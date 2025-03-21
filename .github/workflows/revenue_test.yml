@@ -1,0 +1,42 @@
+name: CI/CD Pipeline for Databricks PySpark Regression Test
+
+on:
+  push:
+    branches:
+      - main  # Trigger on push to the main branch
+  pull_request:
+    branches:
+      - main  # Trigger on pull requests to the main branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # Use an Ubuntu-based runner
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Step 2: Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.8'
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          pip install pyspark  # Install PySpark
+          pip install requests  # Install requests to make API calls to Databricks
+
+      # Step 4: Trigger Databricks Job
+      - name: Trigger Databricks Job
+        run: |
+          curl -X POST https://e2-demo-field-eng.cloud.databricks.com/?o=1444828305810485/api/2.1/jobs/run-now \
+          -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
+          -d '{
+                "job_id": "${{ secrets.DATABRICKS_JOB_ID }}"
+              }'
+
+      # Optional Step 5: Add more steps to handle success/failure
+      # You can add steps to download test results, generate reports, etc.
