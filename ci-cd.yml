@@ -1,0 +1,71 @@
+name: CI/CD Pipeline with Databricks Delta Table Access
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Step 2: Set up Databricks CLI
+      - name: Set up Databricks CLI
+        run: |
+          pip install databricks-cli
+          mkdir -p ~/.databrickscfg
+          echo "[DEFAULT]" > ~/.databrickscfg
+          echo "host = ${{ secrets.DATABRICKS_HOST }}" >> ~/.databrickscfg
+          echo "token = ${{ secrets.DATABRICKS_TOKEN }}" >> ~/.databrickscfg
+
+      # Step 3: Install necessary Python dependencies
+      - name: Install dependencies
+        run: |
+          pip install pyspark
+          pip install databricks-cli
+
+      # Step 4: Run Databricks Delta Table Query and Regression Test
+      - name: Run Databricks Delta Table Query and Perform Regression Test
+        run: |
+          python3 -c "
+          from pyspark.sql import SparkSession
+
+          # Initialize Spark session with Databricks configuration
+          spark = SparkSession.builder \
+              .appName('Databricks Delta Access') \
+              .config('spark.databricks.service.client.enabled', 'true') \
+              .getOrCreate()
+
+          # Load Delta table from Databricks (use path from secrets)
+          delta_table_path = '${{ secrets.DELTA_TABLE_PATH }}'
+          df = spark.read.format('delta').load(delta_table_path)
+
+          # Example: Calculate total revenue from the Delta table (assuming relevant columns)
+          total_revenue_from_delta = df.agg({'revenue': 'sum'}).collect()[0][0]
+
+          # Calculate the revenue based on the SKU data
+          calculated_revenue = df.withColumn('calculated_revenue', df['quantity'] * df['price']) \
+                                 .agg({'calculated_revenue': 'sum'}).collect()[0][0]
+
+          # Perform regression test to check if both values match
+          if total_revenue_from_delta == calculated_revenue:
+              print('Regression test passed: Revenue is consistent')
+          else:
+              print(f'Regression test failed: {total_revenue_from_delta} != {calculated_revenue}')
+              exit(1)
+          "
+
+      # Step 5: (Optional) Deploy your application if tests pass
+      - name: Deploy to production
+        if: success()
+        run: |
+          echo "Deploying to production..."
+          # Add your deployment steps here (e.g., using Docker or other services)
