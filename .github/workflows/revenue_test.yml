@@ -32,7 +32,7 @@ jobs:
       # Step 4: Trigger Databricks Job
       - name: Trigger Databricks Job
         run: |
-          curl -X POST https://e2-demo-field-eng.cloud.databricks.com/?o=1444828305810485/api/2.1/jobs/run-now \
+          curl -X POST https://e2-demo-field-eng.cloud.databricks.com/api/2.1/jobs/run-now \
           -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
           -d '{
                 "job_id": "${{ secrets.DATABRICKS_JOB_ID }}"
