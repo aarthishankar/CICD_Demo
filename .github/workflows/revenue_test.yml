@@ -21,7 +21,7 @@ jobs:
         echo "Triggering Databricks job..."
         
         # Make the API call and capture both the response and the HTTP status code
-        response=$(curl -s -w "\n%{http_code}" -X POST https://e2-demo-field-eng.cloud.databricks.com/api/2.1/jobs/run-now \
+        response=$(curl -s -w "\n%{http_code}" -X POST https://dbc-24f14931-5e2f.cloud.databricks.com/api/2.1/jobs/run-now \
           -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
           -H "Content-Type: application/json" \
           -d '{
@@ -71,7 +71,7 @@ jobs:
           echo "Polling attempt $attempt of $max_attempts..."
           
           # Get the current state of the job
-          status_response=$(curl -s -X GET https://e2-demo-field-eng.cloud.databricks.com/api/2.1/jobs/runs/get \
+          status_response=$(curl -s -X GET https://dbc-24f14931-5e2f.cloud.databricks.com/api/2.1/jobs/runs/get \
             -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
             -d "run_id=$run_id")
           
