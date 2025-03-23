@@ -103,8 +103,10 @@ jobs:
           
           # Get termination details if available
           if [[ "$state" == "TERMINATED" ]]; then
-            termination_reason=$(echo "$status_response" | jq -r '.status.termination_details.reason // "null"')
-            result_state=$termination_reason
+            # Extract the termination code from the correct path according to the API docs
+            result_state=$(echo "$status_response" | jq -r '.status.termination_details.code // "UNKNOWN"')
+            
+            echo "Termination code: $result_state" >> $debug_file
           fi
           
           echo "Extracted values:" >> $debug_file
@@ -141,8 +143,10 @@ jobs:
         result_state="${{ steps.wait_for_job.outputs.result_state }}"
         echo "Databricks job finished with result: $result_state"
         
+        # Check for SUCCESS code according to the API docs
         if [[ "$result_state" == "SUCCESS" ]]; then
           echo "Databricks job succeeded!"
+          exit 0
         else
           echo "::error::Databricks job did not complete successfully. Result: $result_state"
           exit 1
