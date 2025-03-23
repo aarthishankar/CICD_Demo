@@ -1,0 +1,115 @@
+name: Trigger Databricks Job and Fail PR on Failure
+on:
+  pull_request:
+    branches:
+      - main  # Trigger on pull request to the main branch
+jobs:
+  trigger-databricks-job:
+    runs-on: ubuntu-latest  # Use the latest Ubuntu runner
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3  # Updated to v3 for better performance and features
+      
+    - name: Install curl and jq
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl jq
+        
+    - name: Trigger Databricks Job
+      id: trigger_databricks
+      run: |
+        echo "Triggering Databricks job..."
+        
+        # Make the API call and capture both the response and the HTTP status code
+        response=$(curl -s -w "\n%{http_code}" -X POST https://e2-demo-field-eng.cloud.databricks.com/api/2.1/jobs/run-now \
+          -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+                "job_id": ${{ secrets.DATABRICKS_JOB_ID }}
+              }')
+        
+        # Split the response to get the HTTP status code
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | sed '$d')
+        
+        echo "HTTP Status Code: $http_code"
+        echo "Response Body: $body"
+        
+        # Check if the HTTP status code indicates success (2xx)
+        if [[ "$http_code" != 2* ]]; then
+          echo "::error::Failed to trigger Databricks job. HTTP status code: $http_code"
+          echo "::error::Response: $body"
+          exit 1
+        fi
+        
+        # Extract the run_id from the response
+        run_id=$(echo "$body" | jq -r '.run_id')
+        
+        # Check if run_id is valid
+        if [[ -z "$run_id" || "$run_id" == "null" ]]; then
+          echo "::error::Failed to extract run_id from response: $body"
+          exit 1
+        fi
+        
+        echo "Successfully triggered Databricks job with run_id: $run_id"
+        echo "run_id=$run_id" >> $GITHUB_OUTPUT
+    
+    - name: Wait for Databricks Job Completion
+      id: wait_for_job
+      if: success()
+      run: |
+        run_id="${{ steps.trigger_databricks.outputs.run_id }}"
+        echo "Waiting for Databricks job $run_id to complete..."
+        
+        # Initialize variables
+        job_completed=false
+        attempt=1
+        max_attempts=30  # Maximum number of polling attempts
+        sleep_time=30    # Time to wait between polling in seconds
+        
+        while [[ "$job_completed" == "false" && $attempt -le $max_attempts ]]; do
+          echo "Polling attempt $attempt of $max_attempts..."
+          
+          # Get the current state of the job
+          status_response=$(curl -s -X GET https://e2-demo-field-eng.cloud.databricks.com/api/2.1/jobs/runs/get \
+            -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
+            -d "run_id=$run_id")
+          
+          # Extract the life_cycle_state and result_state
+          life_cycle_state=$(echo "$status_response" | jq -r '.state.life_cycle_state')
+          result_state=$(echo "$status_response" | jq -r '.state.result_state')
+          
+          echo "Current state: life_cycle_state=$life_cycle_state, result_state=$result_state"
+          
+          # Check if the job has completed
+          if [[ "$life_cycle_state" == "TERMINATED" || "$life_cycle_state" == "SKIPPED" || "$life_cycle_state" == "INTERNAL_ERROR" ]]; then
+            job_completed=true
+            
+            # Store the result state for the next step
+            echo "result_state=$result_state" >> $GITHUB_OUTPUT
+          else
+            # Sleep before the next polling attempt
+            echo "Job still running. Waiting $sleep_time seconds before next check..."
+            sleep $sleep_time
+            ((attempt++))
+          fi
+        done
+        
+        # Check if we exited the loop due to timeout
+        if [[ "$job_completed" == "false" ]]; then
+          echo "::warning::Timed out waiting for Databricks job to complete."
+          echo "result_state=TIMEOUT" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Check Job Result
+      if: success()
+      run: |
+        result_state="${{ steps.wait_for_job.outputs.result_state }}"
+        echo "Databricks job finished with result: $result_state"
+        
+        if [[ "$result_state" == "SUCCESS" ]]; then
+          echo "Databricks job succeeded!"
+        else
+          echo "::error::Databricks job did not complete successfully. Result: $result_state"
+          exit 1
+        fi
