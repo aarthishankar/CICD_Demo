@@ -64,25 +64,58 @@ jobs:
         # Initialize variables
         job_completed=false
         attempt=1
-        max_attempts=30  # Maximum number of polling attempts
-        sleep_time=30    # Time to wait between polling in seconds
+        max_attempts=100  # Maximum number of polling attempts (increased to 100)
+        sleep_time=5      # Time to wait between polling in seconds (reduced to 5)
+        
+        # Create debug file for logging API responses
+        debug_file="databricks_api_debug.log"
+        touch $debug_file
+        echo "--- Debugging started at $(date) ---" > $debug_file
         
         while [[ "$job_completed" == "false" && $attempt -le $max_attempts ]]; do
           echo "Polling attempt $attempt of $max_attempts..."
           
           # Get the current state of the job
+          echo -e "\n--- API Call at $(date) ---" >> $debug_file
+          
           status_response=$(curl -s -X GET https://dbc-24f14931-5e2f.cloud.databricks.com/api/2.1/jobs/runs/get \
             -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
             -d "run_id=$run_id")
           
-          # Extract the life_cycle_state and result_state
-          life_cycle_state=$(echo "$status_response" | jq -r '.state.life_cycle_state')
-          result_state=$(echo "$status_response" | jq -r '.state.result_state')
+          # Log the full response for debugging
+          echo "Full API response:" >> $debug_file
+          echo "$status_response" >> $debug_file
           
-          echo "Current state: life_cycle_state=$life_cycle_state, result_state=$result_state"
+          # Check if the response contains an error
+          error_message=$(echo "$status_response" | jq -r '.error_code // empty')
+          if [[ ! -z "$error_message" ]]; then
+            echo "API Error: $error_message" >> $debug_file
+            echo "API Error: $error_message"
+            echo "result_state=ERROR" >> $GITHUB_OUTPUT
+            exit 1
+          fi
           
-          # Check if the job has completed
-          if [[ "$life_cycle_state" == "TERMINATED" || "$life_cycle_state" == "SKIPPED" || "$life_cycle_state" == "INTERNAL_ERROR" ]]; then
+          # Extract the state from the status object based on the provided format
+          state=$(echo "$status_response" | jq -r '.status.state // "null"')
+          
+          # Map to old variables for compatibility with the rest of the script
+          life_cycle_state=$state
+          result_state="UNKNOWN"
+          
+          # Get termination details if available
+          if [[ "$state" == "TERMINATED" ]]; then
+            termination_reason=$(echo "$status_response" | jq -r '.status.termination_details.reason // "null"')
+            result_state=$termination_reason
+          fi
+          
+          echo "Extracted values:" >> $debug_file
+          echo "- state: $state" >> $debug_file
+          echo "- result_state: $result_state" >> $debug_file
+          
+          echo "Current state: state=$state, result_state=$result_state"
+          
+          # Check if the job has completed based on the new state enum values
+          if [[ "$state" == "TERMINATED" || "$state" == "TERMINATING" ]]; then
             job_completed=true
             
             # Store the result state for the next step
@@ -100,6 +133,8 @@ jobs:
           echo "::warning::Timed out waiting for Databricks job to complete."
           echo "result_state=TIMEOUT" >> $GITHUB_OUTPUT
         fi
+        
+        echo "See $debug_file for detailed API responses"
     
     - name: Check Job Result
       if: success()
