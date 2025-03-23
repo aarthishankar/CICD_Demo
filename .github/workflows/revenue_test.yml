@@ -1,46 +1,59 @@
-name: CI/CD Pipeline for Databricks PySpark Regression Test
+name: Trigger Databricks Job and Fail PR on Failure
 
 on:
-  push:
-    branches:
-      - main  # Trigger on push to the main branch
   pull_request:
     branches:
-      - main  # Trigger on pull requests to the main branch
+      - main  # Trigger on pull request to the main branch
 
 jobs:
-  build:
-    runs-on: ubuntu-latest  # Use an Ubuntu-based runner
+  trigger-databricks-job:
+    runs-on: ubuntu-latest  # Use the latest Ubuntu runner
 
     steps:
-      # Step 1: Checkout the repository
-      - name: Checkout code
-        uses: actions/checkout@v2
+    - name: Checkout code
+      uses: actions/checkout@v2  # Checkout the repository code to the runner
 
-      # Step 2: Set up Python environment
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.8'
+    - name: Install curl and jq
+      run: |
+        sudo apt-get install curl jq  # Install jq to parse the response from the API
 
-      # Step 3: Install dependencies
-      - name: Install dependencies
-        run: |
-          pip install pyspark  # Install PySpark
-          pip install requests  # Install requests to make API calls to Databricks
-              
-      # Step 4: Trigger Databricks Job
-      - name: Trigger Databricks Job
-        run: |
-          curl -X POST https://e2-demo-field-eng.cloud.databricks.com/api/2.1/jobs/run-now \
-              -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
-              -H "Content-Type: application/json" \
-              -d '{
-                    "job_id": ${{ secrets.DATABRICKS_JOB_ID }}
-              }'
-        env:
-          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}  # Use the token stored as a secret
-          DATABRICKS_JOB_ID: ${{ secrets.DATABRICKS_JOB_ID }}  # Use the Job ID stored as a secret
+    - name: Trigger Databricks Job
+      id: trigger_databricks
+      run: |
+        response=$(curl -X POST https://e2-demo-field-eng.cloud.databricks.com/api/2.1/jobs/run-now \
+          -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+                "job_id": "${{ secrets.DATABRICKS_JOB_ID }}"
+              }')
+        
+        # Extract the run_id from the response to track the job status
+        run_id=$(echo $response | jq -r '.run_id')
+        
+        # Check if run_id is returned (if not, the job triggering failed)
+        if [[ "$run_id" == "null" ]]; then
+          echo "Databricks job failed to trigger. Aborting the PR.";
+          exit 1;  # Fail the job and pull request
+        fi
 
-      # Optional Step 5: Add more steps to handle success/failure
-      # You can add steps to download test results, generate reports, etc.
+        # Wait for the job to finish and get the status (this might take some time)
+        status_response=$(curl -X GET https://e2-demo-field-eng.cloud.databricks.com/api/2.1/jobs/runs/get \
+          -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
+          -d "run_id=$run_id")
+        
+        # Extract the job status
+        status=$(echo $status_response | jq -r '.state.result_state')
+
+        # Check the job status, if it's failed, we fail the GitHub Actions workflow
+        if [[ "$status" == "FAILED" ]]; then
+          echo "Databricks job failed. Failing the PR.";
+          exit 1;  # Fail the GitHub Action and thus the PR
+        elif [[ "$status" != "SUCCESS" ]]; then
+          echo "Databricks job did not complete successfully yet. Please check the job status in Databricks.";
+          exit 1;  # Fail the PR if the status is unknown
+        fi
+
+    - name: Success
+      if: success()
+      run: |
+        echo "Databricks job succeeded! PR passes."
