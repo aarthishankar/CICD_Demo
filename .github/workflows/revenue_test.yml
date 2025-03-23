@@ -78,9 +78,8 @@ jobs:
           # Get the current state of the job
           echo -e "\n--- API Call at $(date) ---" >> $debug_file
           
-          status_response=$(curl -s -X GET https://dbc-24f14931-5e2f.cloud.databricks.com/api/2.1/jobs/runs/get \
-            -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
-            -d "run_id=$run_id")
+          status_response=$(curl -s -X GET "https://dbc-24f14931-5e2f.cloud.databricks.com/api/2.1/jobs/runs/get?run_id=$run_id" \
+            -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}")
           
           # Log the full response for debugging
           echo "Full API response:" >> $debug_file
